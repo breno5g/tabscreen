@@ -22,7 +22,7 @@ let cursor = { x: 0, y: 0, image: null, hotX: 0, hotY: 0, dirty: true };
 let stats = { frames: 0, bytes: 0, rtt: null, decodeMs: 0 };
 const decodeStart = new Map(); // chunk timestamp -> performance.now() at decode()
 
-function setStatus(text) { statusEl.textContent = text; }
+function setStatus(text) { statusEl.textContent = text; statusEl.hidden = false; }
 
 function send(bytes) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(bytes);
@@ -286,11 +286,8 @@ setInterval(() => {
   ping.setUint8(0, MSG.PING);
   ping.setBigUint64(1, BigInt(Math.round(performance.now() * 1000)), true);
   send(ping.buffer);
-  if (decoderState === 'ready') {
-    const rtt = stats.rtt === null ? '–' : `${stats.rtt.toFixed(0)} ms`;
-    const decode = stats.frames ? `${(stats.decodeMs / stats.frames).toFixed(0)} ms` : '–';
-    setStatus(`${size.w}×${size.h} · ${stats.frames} fps · ${(stats.bytes * 8 / 1e6).toFixed(1)} Mbit/s · rtt ${rtt} · decode ${decode}`);
-  }
+  // Status only shows connection problems; hide it while video is playing.
+  if (decoderState === 'ready') statusEl.hidden = true;
   stats.frames = 0;
   stats.bytes = 0;
   stats.decodeMs = 0;
