@@ -116,7 +116,8 @@ WebSocket at `/ws`, binary messages: 1 type byte + payload, little-endian.
 | both | `0x06` | ping / pong | `u64 t_us`; the host echoes it back (round-trip time) |
 | S→C | `0x07` | cursor move | `i32 x` · `i32 y` in device pixels; outside the monitor = hidden |
 | S→C | `0x08` | cursor image | `u16 w` · `u16 h` · `u16 hot_x` · `u16 hot_y` · RGBA pixels; `w = 0` = hidden |
-| C→S | `0x0A` | pointer | `u8 buttons` (bit 0 left, bit 1 right) · `f32 x` · `f32 y`, normalized; from a pen or mouse. The host moves the pointer, then presses or releases buttons to match; ignored with `--no-touch`. (`0x09` is reserved for the frame ack in PLAN.md M2b) |
+| C→S | `0x09` | frame ack | `u64 pts_us` of a frame, sent as soon as it arrives. The host ignores it for now (per-client flow control, PLAN.md M2b, will use it). Answering each frame makes the tablet acknowledge the frame's TCP data at once; otherwise `adbd` (Nagle) held the next small message (cursor move, pong) for up to 40 ms on 10–15 % of messages during video |
+| C→S | `0x0A` | pointer | `u8 buttons` (bit 0 left, bit 1 right) · `f32 x` · `f32 y`, normalized; from a pen or mouse. The host moves the pointer, then presses or releases buttons to match; ignored with `--no-touch` |
 
 Over Wi‑Fi the WebSocket URL carries the stream's token: `…/ws?t=<token>`.
 

@@ -199,8 +199,10 @@ the phone, encoder rate control letting bursts exceed `--bitrate`.
       `audience: client fell behind` lines.
 
 **Fix.**
-- [ ] Protocol: C→S `0x09` *frame ack* (`u64 pts_us`), sent by the client when a
-      frame arrives (before decoding).
+- [x] Protocol: C→S `0x09` *frame ack* (`u64 pts_us`), sent by the client when a
+      frame arrives (before decoding). Done 2026-11-20; the host ignores it until
+      the server part below. It already removes the ~40 ms stalls `adbd` caused
+      over USB (see ARCHITECTURE.md, protocol).
 - [ ] Server: track bytes/frames in flight per client (sent − acked). Above a
       budget (≈100 ms of video or 3 frames), skip delta frames for *that client
       only*, then resume at the next keyframe (request one, throttled as today).

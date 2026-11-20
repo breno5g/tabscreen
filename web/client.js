@@ -3,7 +3,7 @@
 // ARCHITECTURE.md.
 'use strict';
 
-const MSG = { HELLO: 1, CONFIG: 2, FRAME: 3, TOUCH: 4, KEYFRAME_REQUEST: 5, PING: 6, CURSOR_MOVE: 7, CURSOR_IMAGE: 8, POINTER: 10 };
+const MSG = { HELLO: 1, CONFIG: 2, FRAME: 3, TOUCH: 4, KEYFRAME_REQUEST: 5, PING: 6, CURSOR_MOVE: 7, CURSOR_IMAGE: 8, FRAME_ACK: 9, POINTER: 10 };
 const TOUCH = { DOWN: 0, MOVE: 1, UP: 2, CANCEL: 3 };
 const BUTTON = { LEFT: 1, RIGHT: 2 };
 
@@ -110,6 +110,14 @@ async function setupDecoder(codec, firstChunk) {
 }
 
 function onFrame(view, buffer) {
+  // Ack every frame at once, so the tablet acknowledges its TCP data right away.
+  // Otherwise that ACK waits up to 40 ms, and adbd (Nagle) holds back the next
+  // small message (cursor move, pong) until it arrives.
+  const ack = new Uint8Array(9);
+  ack[0] = MSG.FRAME_ACK;
+  ack.set(new Uint8Array(buffer, 2, 8), 1); // the frame's pts_us
+  send(ack);
+
   const keyframe = (view.getUint8(1) & 1) === 1;
   const pts = Number(view.getBigUint64(2, true));
   const data = new Uint8Array(buffer, 10);

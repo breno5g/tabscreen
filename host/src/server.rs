@@ -28,7 +28,7 @@ const MSG_KEYFRAME_REQUEST: u8 = 0x05;
 const MSG_PING: u8 = 0x06;
 const MSG_CURSOR_MOVE: u8 = 0x07;
 const MSG_CURSOR_IMAGE: u8 = 0x08;
-// 0x09 is reserved for the frame ack planned in PLAN.md (M2b).
+const MSG_FRAME_ACK: u8 = 0x09;
 const MSG_POINTER: u8 = 0x0A;
 
 /// Largest monitor we create; H.264 encoders top out around 4096 per side.
@@ -282,6 +282,9 @@ async fn client(mut socket: WebSocket, manager: &Arc<Manager>) -> Result<()> {
                         session.encoder.request_keyframe();
                     }
                     Some(&MSG_PING) => socket.send(Message::Binary(data)).await?,
+                    // Clients ack frames so the adb tunnel doesn't stall (see client.js);
+                    // per-client flow control will use them (PLAN.md, M2b).
+                    Some(&MSG_FRAME_ACK) => {}
                     // Sent again when the tablet rotates.
                     Some(&MSG_HELLO) => {
                         wanted = parse_hello(manager.name(), &data[1..])?;
