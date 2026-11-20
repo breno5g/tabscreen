@@ -250,7 +250,8 @@ is already embedded, so it is a single file plus system libraries.
 ### Stretch
 - Pen pressure/tilt: separate `uinput` tablet device. Mapping it to the virtual
   output on GNOME is the hard part (no public API for virtual outputs).
-- DMA‑BUF import from PipeWire straight into the GPU encoder (no CPU copy).
+- [x] DMA‑BUF import from PipeWire straight into the GPU encoder (no CPU copy):
+  `--capture gpu` (2026-11-20), measurements in ARCHITECTURE.md (design decisions).
 - H.265 / AV1 when both ends support it.
 - Other compositors: KDE (`kwin` virtual outputs), wlroots (`wlr-output-management` + headless outputs).
 
@@ -262,7 +263,7 @@ is already embedded, so it is a single file plus system libraries.
 | Touch coordinates off with fractional scaling | Resolved in M2: touch takes logical px; host divides by the tracked scale |
 | No frames when screen is static → client stalls on join | Keep the last raw frame; re-encode it as an IDR on connect / keyframe request |
 | NVIDIA hybrid graphics: DMA‑BUF import / `nvh264enc` quirks | Start with SHM frames → `x264enc` (CPU); add GPU path after it works |
-| CPU cost of copying BGRx frames (2560×1600×4 B at 60 fps ≈ 1 GB/s) | Fine for M1; DMA‑BUF path later |
+| CPU cost of copying BGRx frames (2560×1600×4 B at 60 fps ≈ 1 GB/s) | `--capture gpu` (DMA‑BUF, no copy) with NVENC; the copy stays for x264 |
 | WebCodecs unavailable over plain HTTP on LAN | Resolved: `--wifi` serves HTTPS with a self-signed certificate |
 
 ## Dev environment notes

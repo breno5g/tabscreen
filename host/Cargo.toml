@@ -12,9 +12,10 @@ axum = { version = "0.8.9", features = ["ws"] }
 axum-server = { version = "0.8.0", features = ["tls-rustls-no-provider"] }
 clap = { version = "4.6.7", features = ["derive"] }
 gstreamer = "0.24.5"
+gstreamer-allocators = "0.24.5"
 gstreamer-app = "0.24.5"
-gstreamer-video = "0.24.5"
-pipewire = "0.10"
+gstreamer-video = { version = "0.24.5", features = ["v1_24"] }
+pipewire = { version = "0.10", features = ["v0_3_33"] }
 qrcode = "0.14.1"
 rand = "0.10.3"
 rcgen = "0.14.10"

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::{Result, bail};
 use clap::Parser;
 use gstreamer as gst;
-use tabscreen_host::encoder::Codec;
+use tabscreen_host::encoder::{Capture, Codec};
 use tabscreen_host::mutter::Source;
 use tabscreen_host::server::{self, Stream};
 use tabscreen_host::session::{Manager, Settings};
@@ -47,6 +47,9 @@ struct Args {
     bind: IpAddr,
     #[arg(long, value_enum, default_value_t = Codec::Auto)]
     encoder: Codec,
+    /// How frames reach the encoder. `gpu` needs NVENC.
+    #[arg(long, value_enum, default_value_t = Capture::Cpu)]
+    capture: Capture,
     /// Target bitrate in kbit/s.
     #[arg(long, default_value_t = 12000)]
     bitrate: u32,
@@ -121,6 +124,9 @@ async fn main() -> Result<()> {
         return list_monitors();
     }
     gst::init()?;
+    if args.capture == Capture::Gpu && args.encoder.resolve() != Codec::Nvenc {
+        bail!("--capture gpu needs NVENC: an NVIDIA GPU and --encoder auto or nvenc");
+    }
 
     let specs = if args.streams.is_empty() {
         let source = args.mirror.clone().map_or(Source::Virtual, Source::Mirror);
@@ -147,6 +153,7 @@ async fn main() -> Result<()> {
                     name: spec.name.clone(),
                     source: spec.source.clone(),
                     codec: args.encoder,
+                    capture: args.capture,
                     bitrate_kbps: args.bitrate,
                     fixed_size: spec.size,
                     touch: spec.touch,
@@ -169,7 +176,7 @@ async fn main() -> Result<()> {
         usb::spawn(args.port, streams[0].manager.clone());
     }
     let wifi_server = if args.wifi { Some(prepare_wifi(&streams, args.wifi_port)?) } else { None };
-    print_streams(&streams, args.port, args.encoder);
+    print_streams(&streams, args.port, args.encoder, args.capture);
 
     let addr = SocketAddr::new(args.bind, args.port);
     let wifi_streams = streams.clone();
@@ -207,8 +214,8 @@ fn path(streams: &[Stream], i: usize) -> String {
     if i == 0 { "/".into() } else { format!("/s/{}/", streams[i].manager.name()) }
 }
 
-fn print_streams(streams: &[Stream], port: u16, encoder: Codec) {
-    eprintln!("tabscreen: encoder {:?}; Ctrl+C to stop", encoder.resolve());
+fn print_streams(streams: &[Stream], port: u16, encoder: Codec, capture: Capture) {
+    eprintln!("tabscreen: encoder {:?}, capture {capture:?}; Ctrl+C to stop", encoder.resolve());
     for (i, stream) in streams.iter().enumerate() {
         let m = &stream.manager;
         let what = match m.source() {

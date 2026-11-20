@@ -25,8 +25,8 @@ phones and laptops. Connect over a USB cable or Wi‑Fi; clients only need Chrom
   tip clicks and the side button right-clicks; touches are ignored while the
   pen is near, so a resting palm doesn't click. A mouse on the tablet works the same way.
 - **Smooth cursor** — drawn on the tablet at 60 Hz, independent of video.
-- **Low latency** — hardware encoding (NVENC) when available, hardware decoding
-  on the tablet.
+- **Low latency** — hardware encoding (NVENC) when available, optionally with
+  frames kept on the GPU from capture to encoder; hardware decoding on the tablet.
 - **USB or Wi‑Fi** — USB via `adb reverse`; Wi‑Fi over HTTPS with an access token.
 - **Several viewers** — any number of browsers can watch the same stream;
   `--no-touch` / `view-only` makes it view-only.
@@ -42,7 +42,8 @@ phones and laptops. Connect over a USB cable or Wi‑Fi; clients only need Chrom
 - `libpipewire-0.3`, GStreamer with `gstreamer1.0-plugins-base`,
   `gstreamer1.0-plugins-bad` and `gstreamer1.0-plugins-ugly`
 - `adb` for USB connections
-- Optional: an NVIDIA GPU (used automatically through `nvh264enc`)
+- Optional: an NVIDIA GPU (used automatically through `nvh264enc`); for
+  `--capture gpu` also `gstreamer1.0-gl`
 
 **Tablet**
 - Android with Chrome
@@ -133,6 +134,14 @@ In **Settings → Displays**, drag the new monitor to where the tablet sits and
 pick a scale (200 % suits high-resolution tablets). Press Ctrl+C to stop; the
 monitor disappears.
 
+### Less CPU: GPU capture
+
+With an NVIDIA GPU, `--capture gpu` keeps every frame on the GPU, from GNOME
+to the encoder, instead of copying it through system memory. On a 2800×1752,
+120 Hz tablet it used about a third of the CPU while scrolling (host + GNOME
+Shell: 60 % of a core instead of 200 %), 40 % less GPU power and half the
+encoding time, at the same frame rate. `cpu` (the default) works with any encoder.
+
 ### Options
 
 | Option | Default | |
@@ -145,6 +154,7 @@ monitor disappears.
 | `--size WxH` | tablet's screen | Fixed monitor size instead of following the tablet |
 | `--list-monitors` | | List monitors and their connector names, then exit |
 | `--encoder auto\|nvenc\|x264` | `auto` | `auto` picks NVENC when available |
+| `--capture cpu\|gpu` | `cpu` | `gpu` keeps frames on the GPU (DMA-BUF to NVENC); needs NVENC — see above |
 | `--bitrate KBPS` | `12000` | Target video bitrate |
 | `--port PORT` | `8765` | HTTP port (USB) |
 | `--wifi-port PORT` | `8766` | HTTPS port (Wi‑Fi) |

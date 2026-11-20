@@ -32,8 +32,8 @@ encoder).
 | `session.rs` | One `Manager` per stream: owns its current session and everything tied to it; creates, resizes and removes it |
 | `mutter.rs` | Mutter D-Bus session: `RemoteDesktop.CreateSession` + `ScreenCast.RecordVirtual` or `RecordMonitor`, touch and pointer injection |
 | `display.rs` | Mutter `DisplayConfig`: finds our connector (`Meta-N`) and tracks its scale |
-| `capture.rs` | PipeWire consumer: frames with pixels → encoder; `SPA_META_Cursor` → cursor channels |
-| `encoder.rs` | GStreamer pipeline `appsrc ! … ! h264parse ! appsink`; keyframes on demand; stats |
+| `capture.rs` | PipeWire consumer: frames with pixels → encoder, copied from shared memory or, with `--capture gpu`, lent as DMA-BUF and requeued once GStreamer drops them; `SPA_META_Cursor` → cursor channels |
+| `encoder.rs` | GStreamer pipeline `appsrc ! … ! h264parse ! appsink` (GPU capture: `glupload ! glcolorconvert` to NV12 `! cudaupload ! nvh264enc`); keyframes on demand; stats |
 | `input.rs` | Touch and pointer injection thread: normalized coordinates → logical pixels → Mutter |
 | `server.rs` | Serves the web client per stream (`/`, `/s/<name>/`), speaks the WebSocket protocol, checks each stream's Wi‑Fi token |
 | `usb.rs` | Keeps `adb reverse` set up for every connected device; opens the page in Chrome when no client connects within 4 s |
@@ -185,6 +185,7 @@ contrast, is in device pixels, matching the video.
 | Rust with its own PipeWire consumer, not Python + `pipewiresrc` | Pointer-only movement produces no frames in embedded cursor mode, and `pipewiresrc` drops the cursor-only buffers of metadata mode — the cursor updated once a second |
 | Client-drawn cursor | 60 Hz cursor independent of video latency |
 | Capture asks for up to 120 fps | Mutter creates the virtual monitor at the stream's maximum frame rate; a 120 Hz tablet got ~115 fps while scrolling (60 before) |
+| `--capture gpu`: our consumer lends its DMA-BUFs to GStreamer, not `pipewiresrc` | Keeps cursor metadata (row above). Tablet at 2800×1752, 120 Hz, scrolling: host + GNOME Shell 200 % → 60 % of a core, NVIDIA 23.6 → 14.3 W, encode 14 → 8 ms, 110 → 120 fps. A `pipewiresrc` prototype stopped at 60 fps, and handing `nvh264enc` the GL texture took 18 ms a frame, hence NV12 in GL plus `cudaupload`. Opt-in until it has more mileage |
 | `60/1` framerate in the encoder caps | With a variable rate (`0/1`) x264 held back one frame, so the last change before the screen went static never arrived |
 | Monitor sized by the client's `hello` | No configuration; follows rotation; one binary for any tablet |
 | Web client first, native app later | Proved the whole path without an Android build |

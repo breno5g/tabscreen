@@ -6,9 +6,10 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use gstreamer as gst;
 use gstreamer::prelude::*;
+use gstreamer_allocators as gst_allocators;
 use gstreamer_app as gst_app;
 use gstreamer_video as gst_video;
 use tokio::sync::broadcast;
@@ -35,6 +36,19 @@ impl Codec {
     }
 }
 
+/// How frames get from the compositor to the encoder.
+#[derive(Clone, Copy, Debug, PartialEq, clap::ValueEnum)]
+pub enum Capture {
+    /// Copy each frame through system memory: up to 120 fps, more CPU
+    Cpu,
+    /// Keep frames on the GPU (DMA-BUF to NVENC): less CPU, power and latency,
+    /// but ~60 fps in fast motion because the GPU stays in its power-saving state
+    Gpu,
+}
+
+/// A DRM format the GPU pipeline can import: fourcc and modifier.
+pub type DrmFormat = (u32, u64);
+
 #[derive(Debug)]
 pub struct EncodedFrame {
     pub keyframe: bool,
@@ -46,7 +60,7 @@ pub struct Encoder {
     pipeline: gst::Pipeline,
     appsrc: gst_app::AppSrc,
     appsink: gst_app::AppSink,
-    /// Last raw frame, re-encoded as a keyframe when a client needs one while
+    /// Last frame, re-encoded as a keyframe when a client needs one while
     /// the screen is static (Mutter only sends frames on damage).
     last: Mutex<Option<gst::Buffer>>,
     last_keyframe_request: Mutex<Option<Instant>>,
@@ -97,13 +111,26 @@ impl Stats {
 const MIN_KEYFRAME_INTERVAL: Duration = Duration::from_millis(250);
 
 impl Encoder {
-    pub fn new(codec: Codec, bitrate_kbps: u32, frames: broadcast::Sender<Arc<EncodedFrame>>) -> Result<Arc<Self>> {
-        let encode = match codec.resolve() {
-            Codec::Nvenc => format!(
-                // NVENC takes BGRx/RGBx directly and converts on the GPU.
-                "nvh264enc preset=p1 tune=ultra-low-latency zerolatency=true bframes=0 \
-                 bitrate={bitrate_kbps} gop-size=600"
+    pub fn new(
+        codec: Codec,
+        capture: Capture,
+        bitrate_kbps: u32,
+        frames: broadcast::Sender<Arc<EncodedFrame>>,
+    ) -> Result<Arc<Self>> {
+        let nvenc = format!(
+            "nvh264enc preset=p1 tune=ultra-low-latency zerolatency=true bframes=0 bitrate={bitrate_kbps} gop-size=600"
+        );
+        let encode = match (codec.resolve(), capture) {
+            // NVENC takes BGRx/RGBx directly and converts on the GPU.
+            (Codec::Nvenc, Capture::Cpu) => nvenc,
+            // DMA-BUF → GL texture → NV12 → CUDA. Measured on the tablet: handing nvh264enc
+            // the GL texture itself took 18 ms a frame; converting to NV12 in GL and copying
+            // it to CUDA with cudaupload takes ~6 ms for the whole path.
+            (Codec::Nvenc, Capture::Gpu) => format!(
+                "glupload ! glcolorconvert ! video/x-raw(memory:GLMemory),format=NV12 \
+                 ! cudaupload ! video/x-raw(memory:CUDAMemory) ! {nvenc}"
             ),
+            (_, Capture::Gpu) => bail!("GPU capture needs NVENC"),
             _ => format!(
                 "videoconvert n-threads=4 ! video/x-raw,format=I420 ! x264enc tune=zerolatency \
                  speed-preset=ultrafast bitrate={bitrate_kbps} key-int-max=600 bframes=0 sliced-threads=true"
@@ -191,11 +218,47 @@ impl Encoder {
         self.appsrc.set_caps(Some(&caps));
     }
 
+    /// DRM formats the GPU pipeline can import on this machine, as glupload
+    /// reports them. Empty unless the encoder was built for [`Capture::Gpu`].
+    pub fn dmabuf_formats(&self) -> Vec<DrmFormat> {
+        let caps = self.appsrc.static_pad("src").unwrap().peer_query_caps(None);
+        let mut names: Vec<String> = Vec::new();
+        for s in caps.iter() {
+            let Ok(value) = s.value("drm-format") else { continue };
+            match value.get::<gst::List>() {
+                Ok(list) => names.extend(list.iter().filter_map(|v| v.get::<String>().ok())),
+                Err(_) => names.extend(value.get::<String>().ok()),
+            }
+        }
+        let mut formats: Vec<DrmFormat> =
+            names.iter().filter_map(|name| gst_video::dma_drm_fourcc_from_str(name).ok()).collect();
+        formats.sort_unstable();
+        formats.dedup();
+        formats
+    }
+
+    /// Caps for DMA-BUF frames in DRM format `fourcc` with `modifier`.
+    pub fn set_dmabuf_format(&self, (fourcc, modifier): DrmFormat, width: u32, height: u32) {
+        let caps = gst::Caps::builder("video/x-raw")
+            .features([gst_allocators::CAPS_FEATURE_MEMORY_DMABUF])
+            .field("format", "DMA_DRM")
+            .field("drm-format", gst_video::dma_drm_fourcc_to_string(fourcc, modifier).as_str())
+            .field("width", width as i32)
+            .field("height", height as i32)
+            .field("framerate", gst::Fraction::new(60, 1))
+            .build();
+        self.appsrc.set_caps(Some(&caps));
+    }
+
     pub fn push(&self, frame: Vec<u8>) {
         static FIRST: std::sync::Once = std::sync::Once::new();
         FIRST.call_once(|| eprintln!("encoder: first raw frame ({} bytes)", frame.len()));
-        let mut buffer = gst::Buffer::from_mut_slice(frame);
-        buffer.get_mut().unwrap().set_pts(self.now());
+        self.push_buffer(gst::Buffer::from_mut_slice(frame));
+    }
+
+    /// Encode `buffer`, and keep it to re-send when a keyframe is requested on a static screen.
+    pub fn push_buffer(&self, mut buffer: gst::Buffer) {
+        buffer.make_mut().set_pts(self.now());
         *self.last.lock().unwrap() = Some(buffer.clone());
         self.pushed.fetch_add(1, Relaxed);
         let _ = self.appsrc.push_buffer(buffer);

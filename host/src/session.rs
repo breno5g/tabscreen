@@ -9,9 +9,9 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use tokio::sync::{broadcast, watch};
 
-use crate::capture::{self, CursorChannels};
+use crate::capture::{self, CursorChannels, Transport};
 use crate::display;
-use crate::encoder::{Codec, EncodedFrame, Encoder};
+use crate::encoder::{Capture, Codec, EncodedFrame, Encoder};
 use crate::input::{self, InputCmd};
 use crate::mutter::{CursorMode, ScreenStream, Source};
 
@@ -24,6 +24,7 @@ pub struct Settings {
     pub name: String,
     pub source: Source,
     pub codec: Codec,
+    pub capture: Capture,
     pub bitrate_kbps: u32,
     /// Overrides the size clients ask for (virtual monitors only).
     pub fixed_size: Option<(u32, u32)>,
@@ -136,9 +137,13 @@ impl Manager {
     }
 
     fn start(self: &Arc<Self>, requested: (u32, u32)) -> Result<Arc<Session>> {
-        let Settings { name, source, codec, bitrate_kbps, .. } = &self.settings;
+        let Settings { name, source, codec, capture, bitrate_kbps, .. } = &self.settings;
         let codec = codec.resolve();
-        let encoder = Encoder::new(codec, *bitrate_kbps, self.frames.clone())?;
+        let encoder = Encoder::new(codec, *capture, *bitrate_kbps, self.frames.clone())?;
+        let transport = match capture {
+            Capture::Cpu => Transport::Shm,
+            Capture::Gpu => Transport::DmaBuf(encoder.dmabuf_formats()),
+        };
         let display = zbus::blocking::Connection::session()?;
         let before = display::scales(&display)?;
         let stream = Arc::new(ScreenStream::start(source, CursorMode::Metadata)?);
@@ -147,7 +152,7 @@ impl Manager {
             Source::Virtual => Some(requested),
             Source::Mirror(_) => None,
         };
-        let capture = capture::spawn(stream.node_id, size, encoder.clone(), self.cursor.clone(), negotiated_tx);
+        let capture = capture::spawn(stream.node_id, size, transport, encoder.clone(), self.cursor.clone(), negotiated_tx);
         let (width, height) =
             negotiated.recv_timeout(Duration::from_secs(5)).context("the stream never negotiated a frame size")?;
         let connector = match source {
@@ -270,6 +275,7 @@ mod tests {
             name: "main".into(),
             source: Source::Virtual,
             codec: Codec::X264,
+            capture: Capture::Cpu,
             bitrate_kbps: 1000,
             fixed_size: None,
             touch: false,
