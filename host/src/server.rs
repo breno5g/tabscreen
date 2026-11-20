@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use axum::Router;
+use axum::serve::ListenerExt;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, Path, Query, State};
 use axum::http::StatusCode;
@@ -66,7 +67,13 @@ fn router(streams: Streams) -> Router {
 /// Plain HTTP, for USB (`adb reverse` makes the tablet's localhost reach us).
 pub async fn serve(addr: SocketAddr, streams: Streams) -> Result<()> {
     let app = router(streams).into_make_service_with_connect_info::<SocketAddr>();
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    // Small messages (pongs, cursor moves) mustn't wait up to 40 ms for the ACK
+    // of the previous frame (Nagle). axum-server already does this for Wi‑Fi.
+    let listener = tokio::net::TcpListener::bind(addr).await?.tap_io(|tcp| {
+        if let Err(e) = tcp.set_nodelay(true) {
+            eprintln!("server: TCP_NODELAY: {e}");
+        }
+    });
     axum::serve(listener, app).await?;
     Ok(())
 }
