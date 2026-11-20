@@ -185,7 +185,7 @@ async fn main() -> Result<()> {
     };
 
     eprintln!("tabscreen: stopping");
-    tokio::task::spawn_blocking(move || streams.iter().for_each(|s| s.manager.stop())).await?;
+    tokio::task::spawn_blocking(move || streams.iter().for_each(|s| s.manager.shutdown())).await?;
     result
 }
 

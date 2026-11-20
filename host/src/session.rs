@@ -6,7 +6,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use tokio::sync::{broadcast, watch};
 
 use crate::capture::{self, CursorChannels};
@@ -57,8 +57,9 @@ pub struct Manager {
     pub cursor: CursorChannels,
     /// The active session; clients watch it to follow restarts and resizes.
     current: watch::Sender<Option<Arc<Session>>>,
-    /// Serializes starting and stopping sessions.
-    lifecycle: Mutex<()>,
+    /// Serializes starting and stopping sessions. True once the host is
+    /// shutting down, so a client that loses its session can't start another.
+    lifecycle: Mutex<bool>,
     /// Connected clients, and a counter bumped on every connect so a pending
     /// idle teardown can tell that someone came back.
     clients: Mutex<(usize, u64)>,
@@ -72,7 +73,7 @@ impl Manager {
             frames,
             cursor: CursorChannels::default(),
             current: watch::channel(None).0,
-            lifecycle: Mutex::new(()),
+            lifecycle: Mutex::new(false),
             clients: Mutex::new((0, 0)),
         })
     }
@@ -106,7 +107,10 @@ impl Manager {
     pub fn acquire(self: &Arc<Self>, requested: (u32, u32)) -> Result<Arc<Session>> {
         let name = &self.settings.name;
         let (width, height) = self.settings.fixed_size.unwrap_or(requested);
-        let _lifecycle = self.lifecycle.lock().unwrap();
+        let shutting_down = self.lifecycle.lock().unwrap();
+        if *shutting_down {
+            bail!("{name}: shutting down");
+        }
         let current = self.current.borrow().clone();
         if let Some(session) = current {
             // A mirror has the mirrored monitor's size, whatever clients ask for.
@@ -225,11 +229,18 @@ impl Manager {
     }
 
     /// Stop the session, if any. Blocks on D-Bus.
-    pub fn stop(&self) {
+    fn stop(&self) {
         let _lifecycle = self.lifecycle.lock().unwrap();
         if let Some(session) = self.current.send_replace(None) {
             session.stop();
         }
+    }
+
+    /// Stop the session for good, as the host exits: clients still connected
+    /// would otherwise start a new one that nothing stops. Blocks on D-Bus.
+    pub fn shutdown(&self) {
+        *self.lifecycle.lock().unwrap() = true;
+        self.stop();
     }
 }
 
@@ -242,5 +253,26 @@ fn end(manager: &Weak<Manager>, ended: &Weak<Session>, reason: &str) {
         eprintln!("{}: {reason}", manager.settings.name);
         ended.stop();
         manager.current.send_replace(None);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_new_session_after_shutdown() {
+        let manager = Manager::new(Settings {
+            name: "main".into(),
+            source: Source::Virtual,
+            codec: Codec::X264,
+            bitrate_kbps: 1000,
+            fixed_size: None,
+            touch: false,
+        });
+        manager.shutdown();
+        // Bails before touching D-Bus or GStreamer, so this runs without a desktop.
+        let err = manager.acquire((640, 480)).err().expect("acquire must fail after shutdown");
+        assert!(err.to_string().contains("shutting down"), "{err:#}");
     }
 }
