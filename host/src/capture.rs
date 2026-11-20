@@ -85,9 +85,9 @@ fn format_param(size: Option<(u32, u32)>) -> Vec<u8> {
             Choice,
             Range,
             Fraction,
-            Fraction { num: 60, denom: 1 },
+            Fraction { num: 120, denom: 1 },
             Fraction { num: 1, denom: 1 },
-            Fraction { num: 60, denom: 1 }
+            Fraction { num: 120, denom: 1 }
         ),
     );
     format.properties.push(match size {

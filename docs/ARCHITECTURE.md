@@ -182,6 +182,7 @@ contrast, is in device pixels, matching the video.
 | Mutter D-Bus API, not the xdg-desktop-portal | The portal rejects every touch on virtual streams ("Invalid position": it checks against a stream size virtual streams don't report), and restored portal sessions drop touch permission |
 | Rust with its own PipeWire consumer, not Python + `pipewiresrc` | Pointer-only movement produces no frames in embedded cursor mode, and `pipewiresrc` drops the cursor-only buffers of metadata mode — the cursor updated once a second |
 | Client-drawn cursor | 60 Hz cursor independent of video latency |
+| Capture asks for up to 120 fps | Mutter creates the virtual monitor at the stream's maximum frame rate; a 120 Hz tablet got ~115 fps while scrolling (60 before) |
 | `60/1` framerate in the encoder caps | With a variable rate (`0/1`) x264 held back one frame, so the last change before the screen went static never arrived |
 | Monitor sized by the client's `hello` | No configuration; follows rotation; one binary for any tablet |
 | Web client first, native app later | Proved the whole path without an Android build |
