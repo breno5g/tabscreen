@@ -113,14 +113,12 @@ tablet's monitor. Move the mouse onto it (past the edge you arranged in Settings
    your screen activity means the computer is struggling; with x264, try
    `--encoder nvenc` if you have an NVIDIA GPU.
 
-**One viewer (e.g. a phone) lags further and further behind, especially during
-animations**
-Known issue (see PLAN, *M2b*): the host doesn't yet drop frames for a viewer whose
-connection can't keep up, so video queues up and the delay grows. Check `rtt` on
-that device's status line — hundreds of ms during animations means queueing. Until
-per-client flow control lands, lower `--bitrate` (e.g. `6000`), move the device
-closer to the router or onto 5 GHz Wi‑Fi, and prefer USB for the presenter's
-tablet.
+**One viewer (e.g. a phone) is choppy during animations**
+Its connection is slower than the video. The host skips frames for that viewer
+only, so it gets a lower frame rate instead of falling behind; the host log
+shows `client … can't keep up, skipped N frames`. To make it smoother, lower
+`--bitrate` (e.g. `6000`), move the device closer to the router or onto 5 GHz
+Wi‑Fi, and prefer USB for the presenter's tablet.
 
 **Low fps when the screen is busy**
 Frames are only sent when something changes, so a static screen shows low fps —

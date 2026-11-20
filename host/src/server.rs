@@ -1,9 +1,9 @@
 //! HTTP + WebSocket server: serves the web client and speaks the protocol in PLAN.md.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use axum::Router;
@@ -14,6 +14,7 @@ use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::get;
 use tokio::sync::broadcast;
+use tokio::time::MissedTickBehavior;
 
 use crate::capture::CursorImage;
 use crate::encoder::EncodedFrame;
@@ -33,6 +34,50 @@ const MSG_POINTER: u8 = 0x0A;
 
 /// Largest monitor we create; H.264 encoders top out around 4096 per side.
 const MAX_SIDE: u32 = 4096;
+
+/// How long a frame may go unacked before we stop sending that client more.
+/// Past this its link is slower than the video: frames would pile up in TCP
+/// buffers (seconds of delay), so we skip frames for it instead.
+const MAX_FRAME_DELAY: Duration = Duration::from_millis(100);
+
+/// Frames sent to one client that it hasn't acked yet, oldest first.
+#[derive(Default)]
+struct InFlight(VecDeque<SentFrame>);
+
+struct SentFrame {
+    /// When it was sent, or when the keyframe in front of it was acked.
+    since: Instant,
+    keyframe: bool,
+}
+
+impl InFlight {
+    fn sent(&mut self, keyframe: bool, now: Instant) {
+        self.0.push_back(SentFrame { since: now, keyframe });
+    }
+
+    /// Clients ack every frame, in order.
+    fn acked(&mut self, now: Instant) {
+        if self.0.pop_front().is_some_and(|f| f.keyframe) {
+            // The frames behind a keyframe waited for it; don't count that against them.
+            for f in &mut self.0 {
+                f.since = now;
+            }
+        }
+    }
+
+    /// The oldest frame has waited too long. Keyframes are ~10× the size of
+    /// other frames, so they get 10× as long.
+    fn congested(&self, now: Instant) -> bool {
+        self.0.front().is_some_and(|f| {
+            let limit = if f.keyframe { 10 * MAX_FRAME_DELAY } else { MAX_FRAME_DELAY };
+            now.duration_since(f.since) > limit
+        })
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
 
 /// One stream as the server sees it.
 pub struct Stream {
@@ -140,7 +185,7 @@ fn open(
     ws.on_upgrade(move |socket| async move {
         let clients = manager.client_connected();
         eprintln!("{}: client {peer} connected ({clients} connected)", manager.name());
-        if let Err(e) = client(socket, &manager).await {
+        if let Err(e) = client(socket, &manager, peer).await {
             // A tab closed or a cable pulled resets the connection; not worth an error.
             let reset = e.chain().any(|c| {
                 let c = c.to_string();
@@ -231,7 +276,7 @@ async fn start_session(socket: &mut WebSocket, session: &Session, touch: bool) -
     Ok(())
 }
 
-async fn client(mut socket: WebSocket, manager: &Arc<Manager>) -> Result<()> {
+async fn client(mut socket: WebSocket, manager: &Arc<Manager>, peer: SocketAddr) -> Result<()> {
     // The client says how big its screen is before we create a monitor for it.
     let wanted = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
@@ -260,6 +305,13 @@ async fn client(mut socket: WebSocket, manager: &Arc<Manager>) -> Result<()> {
     socket.send(cursor_move_message(current_position)).await?;
     // Decoding can only start at a keyframe.
     let mut need_keyframe = true;
+    let mut in_flight = InFlight::default();
+    // The encoder drops a request made within 250 ms of another, and a keyframe
+    // that came while this client was congested was skipped: keep asking.
+    let mut keyframe_retry = tokio::time::interval(Duration::from_millis(250));
+    keyframe_retry.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let mut skipped = 0u32;
+    let mut skip_report: Option<Instant> = None;
 
     loop {
         tokio::select! {
@@ -282,9 +334,7 @@ async fn client(mut socket: WebSocket, manager: &Arc<Manager>) -> Result<()> {
                         session.encoder.request_keyframe();
                     }
                     Some(&MSG_PING) => socket.send(Message::Binary(data)).await?,
-                    // Clients ack frames so the adb tunnel doesn't stall (see client.js);
-                    // per-client flow control will use them (PLAN.md, M2b).
-                    Some(&MSG_FRAME_ACK) => {}
+                    Some(&MSG_FRAME_ACK) => in_flight.acked(Instant::now()),
                     // Sent again when the tablet rotates.
                     Some(&MSG_HELLO) => {
                         wanted = parse_hello(manager.name(), &data[1..])?;
@@ -314,10 +364,23 @@ async fn client(mut socket: WebSocket, manager: &Arc<Manager>) -> Result<()> {
             }
             frame = frames.recv() => match frame {
                 Ok(frame) => {
+                    let now = Instant::now();
+                    if in_flight.congested(now) {
+                        // Let it catch up, then resync with a keyframe: a lower
+                        // frame rate for this client instead of a growing delay.
+                        need_keyframe = true;
+                        skipped += 1;
+                        if skip_report.is_none_or(|t| t.elapsed() >= Duration::from_secs(5)) {
+                            eprintln!("{}: client {peer} can't keep up, skipped {skipped} frames", manager.name());
+                            (skipped, skip_report) = (0, Some(now));
+                        }
+                        continue;
+                    }
                     if need_keyframe && !frame.keyframe {
                         continue;
                     }
                     need_keyframe = false;
+                    in_flight.sent(frame.keyframe, now);
                     socket.send(frame_message(&frame)).await?;
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
@@ -327,6 +390,9 @@ async fn client(mut socket: WebSocket, manager: &Arc<Manager>) -> Result<()> {
                 }
                 Err(broadcast::error::RecvError::Closed) => return Ok(()),
             },
+            _ = keyframe_retry.tick(), if need_keyframe && in_flight.is_empty() => {
+                session.encoder.request_keyframe();
+            }
             Ok(()) = position.changed() => {
                 let pos = *position.borrow_and_update();
                 socket.send(cursor_move_message(pos)).await?;
@@ -353,5 +419,29 @@ mod tests {
         assert!(matches!(cmd, Some(InputCmd::Pointer { buttons: BUTTON_RIGHT, x: 0.25, y: 0.5 })), "{cmd:?}");
         assert!(parse_pointer(&pointer(BUTTON_LEFT, f32::NAN, 0.5)).is_none());
         assert!(parse_pointer(&pointer(BUTTON_LEFT, 0.5, 0.5)[..8]).is_none(), "too short");
+    }
+
+    #[test]
+    fn congested_when_a_frame_waits_too_long() {
+        let t0 = Instant::now();
+        let ms = |n| t0 + Duration::from_millis(n);
+        let mut f = InFlight::default();
+        f.acked(t0); // a stray ack is ignored
+        assert!(f.is_empty() && !f.congested(t0));
+
+        f.sent(false, t0);
+        assert!(!f.congested(ms(100)));
+        assert!(f.congested(ms(101)));
+        f.acked(ms(101));
+        assert!(f.is_empty() && !f.congested(ms(500)));
+
+        // A keyframe gets 10× as long, and the frame behind it doesn't pay for that wait.
+        f.sent(true, t0);
+        f.sent(false, ms(10));
+        assert!(!f.congested(ms(1000)));
+        assert!(f.congested(ms(1001)));
+        f.acked(ms(900));
+        assert!(!f.congested(ms(1000)));
+        assert!(f.congested(ms(1001)));
     }
 }

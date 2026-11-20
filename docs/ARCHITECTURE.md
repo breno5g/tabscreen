@@ -54,7 +54,17 @@ encoder).
 
 Encoded frames go to clients through a `tokio::sync::broadcast` channel (8
 frames). A client that falls behind skips to the next keyframe instead of
-queueing stale video. Cursor state uses `watch` channels: only the latest
+queueing stale video.
+
+**Per-client flow control.** A slow link wouldn't make the channel lag: sends
+complete into the kernel's TCP buffers (megabytes, seconds of video), so delay
+would grow instead. Each client acks every frame (`0x09`), and its task keeps
+the frames it hasn't acked yet. When the oldest has waited over 100 ms
+(1 s for a keyframe, ~10× the size), the task skips frames for that client
+only; once all are acked, it asks for a keyframe and resumes there. Frames
+queued behind a keyframe start their 100 ms when it's acked, so one slow
+keyframe doesn't force another. The host logs `client … can't keep up, skipped
+N frames` at most every 5 s. Cursor state uses `watch` channels: only the latest
 position and image matter.
 
 ## Streams and routes
@@ -116,7 +126,7 @@ WebSocket at `/ws`, binary messages: 1 type byte + payload, little-endian.
 | both | `0x06` | ping / pong | `u64 t_us`; the host echoes it back (round-trip time) |
 | S→C | `0x07` | cursor move | `i32 x` · `i32 y` in device pixels; outside the monitor = hidden |
 | S→C | `0x08` | cursor image | `u16 w` · `u16 h` · `u16 hot_x` · `u16 hot_y` · RGBA pixels; `w = 0` = hidden |
-| C→S | `0x09` | frame ack | `u64 pts_us` of a frame, sent as soon as it arrives. The host ignores it for now (per-client flow control, PLAN.md M2b, will use it). Answering each frame makes the tablet acknowledge the frame's TCP data at once; otherwise `adbd` (Nagle) held the next small message (cursor move, pong) for up to 40 ms on 10–15 % of messages during video |
+| C→S | `0x09` | frame ack | `u64 pts_us` of a frame, sent as soon as it arrives. Required: the host stops sending video to a client whose acks fall behind (per-client flow control, see *Threads*). Answering each frame makes the tablet acknowledge the frame's TCP data at once; otherwise `adbd` (Nagle) held the next small message (cursor move, pong) for up to 40 ms on 10–15 % of messages during video |
 | C→S | `0x0A` | pointer | `u8 buttons` (bit 0 left, bit 1 right) · `f32 x` · `f32 y`, normalized; from a pen or mouse. The host moves the pointer, then presses or releases buttons to match; ignored with `--no-touch` |
 
 Over Wi‑Fi the WebSocket URL carries the stream's token: `…/ws?t=<token>`.

@@ -48,15 +48,20 @@ fn touch(action: u8, slot: u8, x: f32, y: f32) -> Message {
     Message::Binary(m.into())
 }
 
-/// Read and tally messages for `d`.
+/// Read and tally messages for `d`, acking frames like the web client.
 async fn read_for<S>(ws: &mut S, seen: &mut Seen, d: Duration) -> Result<()>
 where
-    S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+    S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
+        + futures_util::Sink<Message, Error = tokio_tungstenite::tungstenite::Error>
+        + Unpin,
 {
     let end = tokio::time::Instant::now() + d;
     while let Ok(Some(msg)) = tokio::time::timeout_at(end, ws.next()).await {
         if let Message::Binary(data) = msg? {
             note(seen, &data);
+            if data[0] == 0x03 {
+                ws.send(Message::Binary([&[0x09], &data[2..10]].concat().into())).await?;
+            }
         }
     }
     Ok(())

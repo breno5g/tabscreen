@@ -89,7 +89,11 @@ cargo run --release --example ws_check -- 8799 2000x1250        # the first stre
 ```
 
 `probe` connects like a client to any stream and reports the config, frames,
-keyframes and cursor messages it receives. A mirror only has a frame after its
+keyframes, cursor messages and ping round trip. An optional fourth argument
+caps how fast it reads video (kbit/s), like a viewer on a slow link; with a
+window repainting its monitor, the rtt shows whether video queues up. Test
+clients must ack each frame (`0x09`) like the web client, or the host stops
+sending them video. A mirror only has a frame after its
 monitor's content has changed once since the host started.
 
 For the browser side, open `http://localhost:8799` in desktop Chrome; the status

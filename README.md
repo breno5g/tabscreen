@@ -124,9 +124,9 @@ tabscreen-host --wifi \
 Stream syntax: `NAME=virtual[,view-only][,size=WxH]` or
 `NAME=mirror:CONNECTOR[,view-only]`. The first stream is also served at `/`.
 A mirror starts with the host and stays running; until the mirrored screen
-first changes after startup, viewers see "waiting for video". Known issue: a
-viewer on a slow connection can fall behind during animations — see
-[Troubleshooting](docs/TROUBLESHOOTING.md).
+first changes after startup, viewers see "waiting for video". A viewer on a
+slow connection gets a lower frame rate during animations instead of falling
+behind — see [Troubleshooting](docs/TROUBLESHOOTING.md).
 
 ### Then
 

@@ -200,15 +200,20 @@ the phone, encoder rate control letting bursts exceed `--bitrate`.
 
 **Fix.**
 - [x] Protocol: C→S `0x09` *frame ack* (`u64 pts_us`), sent by the client when a
-      frame arrives (before decoding). Done 2026-11-20; the host ignores it until
-      the server part below. It already removes the ~40 ms stalls `adbd` caused
+      frame arrives (before decoding). Done 2026-11-20. It also removes the ~40 ms stalls `adbd` caused
       over USB (see ARCHITECTURE.md, protocol).
-- [ ] Server: track bytes/frames in flight per client (sent − acked). Above a
-      budget (≈100 ms of video or 3 frames), skip delta frames for *that client
-      only*, then resume at the next keyframe (request one, throttled as today).
-      Slow viewers get a lower frame rate instead of growing delay; others are
-      unaffected.
-- [ ] Count skipped frames per client and show it in the status line/host log.
+- [x] Server: track frames in flight per client (sent − acked). When the
+      oldest has waited over 100 ms (1 s for a keyframe), skip frames for *that
+      client only*; once all are acked, request a keyframe (retried every 250 ms)
+      and resume there. Frames behind a keyframe start their 100 ms when it's
+      acked, so a keyframe that takes long on a slower link doesn't cascade into
+      resyncs. Done 2026-11-20. Measured with `probe … KBPS` (a client reading
+      at a capped rate) and a window repainting the whole 1280×800 monitor
+      (~15 Mbit/s): rtt median / max went from 6.9 s / 8.8 s to 224 ms / 1.0 s
+      at 3 Mbit/s, 2.2 s / 2.8 s to 87 ms / 331 ms at 10 Mbit/s, and
+      546 ms / 1.4 s to 58 ms / 302 ms at 20 Mbit/s.
+- [ ] Count skipped frames per client and show it in the status line (host
+      log done: `client … can't keep up, skipped N frames`).
 - [ ] Encoder rate control: constant bitrate with a small VBV buffer
       (`nvh264enc rc-mode=cbr vbv-buffer-size=…`, x264 `vbv-buf-capacity`) so
       animations can't burst far above `--bitrate`.

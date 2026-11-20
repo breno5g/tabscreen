@@ -8,7 +8,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
-use futures_util::{SinkExt, Stream, StreamExt};
+use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use tokio_tungstenite::tungstenite::{Error, Message};
 
 #[derive(Default, Debug)]
@@ -18,9 +18,10 @@ struct Seen {
     keyframes: u32,
 }
 
+/// Read and tally messages for `d`, acking frames like the web client.
 async fn read_for<S>(ws: &mut S, seen: &mut Seen, d: Duration) -> Result<()>
 where
-    S: Stream<Item = Result<Message, Error>> + Unpin,
+    S: Stream<Item = Result<Message, Error>> + Sink<Message, Error = Error> + Unpin,
 {
     let end = tokio::time::Instant::now() + d;
     while let Ok(Some(msg)) = tokio::time::timeout_at(end, ws.next()).await {
@@ -30,6 +31,7 @@ where
                 0x03 => {
                     seen.frames += 1;
                     seen.keyframes += (data[1] & 1) as u32;
+                    ws.send(Message::Binary([&[0x09], &data[2..10]].concat().into())).await?;
                 }
                 _ => {}
             }
