@@ -66,8 +66,8 @@ Or build from source — see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 1. Connect the tablet with a USB cable.
 2. Run `tabscreen-host --usb`.
-3. On the tablet, open **`http://localhost:8765`** in Chrome and tap to start
-   (fullscreen, screen stays on).
+3. Chrome opens the page on the tablet by itself (if it doesn't, open
+   **`http://localhost:8765`**). Tap to start (fullscreen, screen stays on).
 
 ### Over Wi‑Fi
 
@@ -134,7 +134,7 @@ monitor disappears.
 
 | Option | Default | |
 |---|---|---|
-| `--usb` | off | Keep `adb reverse` set up for USB devices, including after a replug |
+| `--usb` | off | Keep `adb reverse` set up for USB devices, including after a replug, and open the page in Chrome on the device unless it's already connected |
 | `--wifi` | off | Also accept tablets over Wi‑Fi (HTTPS + token) |
 | `--stream SPEC` | one virtual stream | Define a stream (repeatable); see above |
 | `--mirror CONNECTOR` | — | Mirror an existing monitor instead of creating one |

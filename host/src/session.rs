@@ -199,6 +199,10 @@ impl Manager {
         Ok(())
     }
 
+    pub fn clients(&self) -> usize {
+        self.clients.lock().unwrap().0
+    }
+
     /// Returns how many clients are now connected.
     pub fn client_connected(&self) -> usize {
         let mut clients = self.clients.lock().unwrap();

@@ -36,7 +36,7 @@ encoder).
 | `encoder.rs` | GStreamer pipeline `appsrc ! … ! h264parse ! appsink`; keyframes on demand; stats |
 | `input.rs` | Touch injection thread: normalized coordinates → logical pixels → Mutter |
 | `server.rs` | Serves the web client per stream (`/`, `/s/<name>/`), speaks the WebSocket protocol, checks each stream's Wi‑Fi token |
-| `usb.rs` | Keeps `adb reverse` set up for every connected device |
+| `usb.rs` | Keeps `adb reverse` set up for every connected device; opens the page in Chrome when no client connects within 4 s |
 | `wifi.rs` | Self-signed certificate, access token, LAN address, QR code |
 | `web/client.js` | Decoder setup and fallback, cursor overlay, touch, reconnect, status line |
 

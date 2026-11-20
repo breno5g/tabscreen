@@ -166,7 +166,7 @@ async fn main() -> Result<()> {
         });
     }
     if args.usb {
-        usb::spawn(args.port);
+        usb::spawn(args.port, streams[0].manager.clone());
     }
     let wifi_server = if args.wifi { Some(prepare_wifi(&streams, args.wifi_port)?) } else { None };
     print_streams(&streams, args.port, args.encoder);
