@@ -21,7 +21,7 @@ encoder).
                                                                             ▼
                                        server (axum WebSocket) ═══ USB / Wi‑Fi ═══► decode (WebCodecs)
                                             ▲                                       + draw cursor
- Mutter NotifyTouch* ◄── input ◄────────────┘◄──────────── touch events ◄────────── pointer events
+ Mutter NotifyTouch*/Pointer* ◄── input ◄───┘◄────── touch + pen events ◄────────── pointer events
 ```
 
 ## Components
@@ -30,15 +30,15 @@ encoder).
 |---|---|
 | `main.rs` | CLI, starts the HTTP (USB) and optional HTTPS (Wi‑Fi) servers |
 | `session.rs` | One `Manager` per stream: owns its current session and everything tied to it; creates, resizes and removes it |
-| `mutter.rs` | Mutter D-Bus session: `RemoteDesktop.CreateSession` + `ScreenCast.RecordVirtual` or `RecordMonitor`, touch injection |
+| `mutter.rs` | Mutter D-Bus session: `RemoteDesktop.CreateSession` + `ScreenCast.RecordVirtual` or `RecordMonitor`, touch and pointer injection |
 | `display.rs` | Mutter `DisplayConfig`: finds our connector (`Meta-N`) and tracks its scale |
 | `capture.rs` | PipeWire consumer: frames with pixels → encoder; `SPA_META_Cursor` → cursor channels |
 | `encoder.rs` | GStreamer pipeline `appsrc ! … ! h264parse ! appsink`; keyframes on demand; stats |
-| `input.rs` | Touch injection thread: normalized coordinates → logical pixels → Mutter |
+| `input.rs` | Touch and pointer injection thread: normalized coordinates → logical pixels → Mutter |
 | `server.rs` | Serves the web client per stream (`/`, `/s/<name>/`), speaks the WebSocket protocol, checks each stream's Wi‑Fi token |
 | `usb.rs` | Keeps `adb reverse` set up for every connected device; opens the page in Chrome when no client connects within 4 s |
 | `wifi.rs` | Self-signed certificate, access token, LAN address, QR code |
-| `web/client.js` | Decoder setup and fallback, cursor overlay, touch, reconnect, status line |
+| `web/client.js` | Decoder setup and fallback, cursor overlay, touch, pen and mouse (with palm rejection), reconnect, status line |
 
 ### Threads
 
@@ -116,6 +116,7 @@ WebSocket at `/ws`, binary messages: 1 type byte + payload, little-endian.
 | both | `0x06` | ping / pong | `u64 t_us`; the host echoes it back (round-trip time) |
 | S→C | `0x07` | cursor move | `i32 x` · `i32 y` in device pixels; outside the monitor = hidden |
 | S→C | `0x08` | cursor image | `u16 w` · `u16 h` · `u16 hot_x` · `u16 hot_y` · RGBA pixels; `w = 0` = hidden |
+| C→S | `0x0A` | pointer | `u8 buttons` (bit 0 left, bit 1 right) · `f32 x` · `f32 y`, normalized; from a pen or mouse. The host moves the pointer, then presses or releases buttons to match; ignored with `--no-touch`. (`0x09` is reserved for the frame ack in PLAN.md M2b) |
 
 Over Wi‑Fi the WebSocket URL carries the stream's token: `…/ws?t=<token>`.
 
@@ -150,7 +151,8 @@ Cursor movement therefore never waits for video encoding.
 
 ## Touch and display scaling
 
-The client sends normalized coordinates. Mutter's `NotifyTouch*` expects
+The client sends normalized coordinates. Mutter's `NotifyTouch*` (and
+`NotifyPointerMotionAbsolute`, used for the pen) expects
 **logical** pixels of the stream, so the host converts with
 `x · (width − 1) / scale`, using the monitor's current scale from
 `DisplayConfig` (updated live on `MonitorsChanged`). Cursor metadata, in

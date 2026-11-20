@@ -94,6 +94,12 @@ impl ScreenStream {
         Ok(())
     }
 
+    /// `button` is an evdev code, e.g. `BTN_LEFT` (0x110).
+    pub fn pointer_button(&self, button: i32, pressed: bool) -> Result<()> {
+        self.rd_session.call_method("NotifyPointerButton", &(button, pressed))?;
+        Ok(())
+    }
+
     pub fn stop(&self) {
         // Fails harmlessly if Mutter already ended the session (stream consumer gone).
         let _ = self.rd_session.call_method("Stop", &());

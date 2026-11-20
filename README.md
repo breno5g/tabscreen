@@ -21,6 +21,9 @@ phones and laptops. Connect over a USB cable or Wi‑Fi; clients only need Chrom
 - **Sized by the tablet** — matches the tablet's resolution, follows rotation,
   and is removed shortly after the tablet disconnects.
 - **Touch** — multi-touch at exact positions, at any display scale.
+- **Pen as a mouse** — hovering a stylus (e.g. the S Pen) moves the pointer, the
+  tip clicks and the side button right-clicks; touches are ignored while the
+  pen is near, so a resting palm doesn't click. A mouse on the tablet works the same way.
 - **Smooth cursor** — drawn on the tablet at 60 Hz, independent of video.
 - **Low latency** — hardware encoding (NVENC) when available, hardware decoding
   on the tablet.

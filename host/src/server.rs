@@ -16,7 +16,7 @@ use tokio::sync::broadcast;
 
 use crate::capture::CursorImage;
 use crate::encoder::EncodedFrame;
-use crate::input::{InputCmd, TouchAction};
+use crate::input::{BUTTON_LEFT, BUTTON_RIGHT, InputCmd, TouchAction};
 use crate::session::{Manager, Session};
 
 const MSG_HELLO: u8 = 0x01;
@@ -27,6 +27,8 @@ const MSG_KEYFRAME_REQUEST: u8 = 0x05;
 const MSG_PING: u8 = 0x06;
 const MSG_CURSOR_MOVE: u8 = 0x07;
 const MSG_CURSOR_IMAGE: u8 = 0x08;
+// 0x09 is reserved for the frame ack planned in PLAN.md (M2b).
+const MSG_POINTER: u8 = 0x0A;
 
 /// Largest monitor we create; H.264 encoders top out around 4096 per side.
 const MAX_SIDE: u32 = 4096;
@@ -188,6 +190,14 @@ fn parse_touch(payload: &[u8]) -> Option<InputCmd> {
     Some(InputCmd::Touch { action, slot: *slot as u32, x, y })
 }
 
+fn parse_pointer(payload: &[u8]) -> Option<InputCmd> {
+    let [buttons, rest @ ..] = payload else { return None };
+    let x = f32::from_le_bytes(rest.get(0..4)?.try_into().ok()?);
+    let y = f32::from_le_bytes(rest.get(4..8)?.try_into().ok()?);
+    // NaN would reach Mutter as a position; unknown button bits are dropped.
+    (x.is_finite() && y.is_finite()).then_some(InputCmd::Pointer { buttons: buttons & (BUTTON_LEFT | BUTTON_RIGHT), x, y })
+}
+
 /// Screen size from a hello message, rounded down to even numbers (4:2:0 video).
 fn parse_hello(name: &str, payload: &[u8]) -> Result<(u32, u32)> {
     let hello: serde_json::Value = serde_json::from_slice(payload).context("hello is not JSON")?;
@@ -255,6 +265,11 @@ async fn client(mut socket: WebSocket, manager: &Arc<Manager>) -> Result<()> {
                             let _ = session.input.send(cmd);
                         }
                     }
+                    Some(&MSG_POINTER) if manager.touch_enabled() => {
+                        if let Some(cmd) = parse_pointer(&data[1..]) {
+                            let _ = session.input.send(cmd);
+                        }
+                    }
                     Some(&MSG_KEYFRAME_REQUEST) => {
                         need_keyframe = true;
                         session.encoder.request_keyframe();
@@ -311,5 +326,22 @@ async fn client(mut socket: WebSocket, manager: &Arc<Manager>) -> Result<()> {
                 socket.send(cursor_image_message(&current)).await?;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pointer(buttons: u8, x: f32, y: f32) -> Vec<u8> {
+        [vec![buttons], x.to_le_bytes().to_vec(), y.to_le_bytes().to_vec()].concat()
+    }
+
+    #[test]
+    fn parses_pointer_and_rejects_bad_input() {
+        let cmd = parse_pointer(&pointer(BUTTON_RIGHT | 0x80, 0.25, 0.5));
+        assert!(matches!(cmd, Some(InputCmd::Pointer { buttons: BUTTON_RIGHT, x: 0.25, y: 0.5 })), "{cmd:?}");
+        assert!(parse_pointer(&pointer(BUTTON_LEFT, f32::NAN, 0.5)).is_none());
+        assert!(parse_pointer(&pointer(BUTTON_LEFT, 0.5, 0.5)[..8]).is_none(), "too short");
     }
 }

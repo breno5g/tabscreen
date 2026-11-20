@@ -1,9 +1,11 @@
 // TabScreen web client: decodes the H.264 stream with WebCodecs, draws the
-// cursor on an overlay, and sends touches back. Protocol: see PLAN.md.
+// cursor on an overlay, and sends touch, pen and mouse input back. Protocol: see
+// ARCHITECTURE.md.
 'use strict';
 
-const MSG = { HELLO: 1, CONFIG: 2, FRAME: 3, TOUCH: 4, KEYFRAME_REQUEST: 5, PING: 6, CURSOR_MOVE: 7, CURSOR_IMAGE: 8 };
+const MSG = { HELLO: 1, CONFIG: 2, FRAME: 3, TOUCH: 4, KEYFRAME_REQUEST: 5, PING: 6, CURSOR_MOVE: 7, CURSOR_IMAGE: 8, POINTER: 10 };
 const TOUCH = { DOWN: 0, MOVE: 1, UP: 2, CANCEL: 3 };
+const BUTTON = { LEFT: 1, RIGHT: 2 };
 
 const screenCanvas = document.getElementById('screen');
 const cursorCanvas = document.getElementById('cursor');
@@ -159,9 +161,19 @@ function drawCursor() {
 }
 requestAnimationFrame(drawCursor);
 
-// --- touch ----------------------------------------------------------------------
+// --- touch, pen and mouse --------------------------------------------------------
 
 const slots = new Map(); // pointerId -> slot
+// A touch that starts this soon after the pen was near is a resting palm.
+const PALM_MS = 500;
+let penSeen = -Infinity;
+
+// The event's position, normalized to [0, 1] across the monitor, at `offset`.
+function writePosition(view, offset, e) {
+  const rect = cursorCanvas.getBoundingClientRect();
+  view.setFloat32(offset, (e.clientX - rect.left) / rect.width, true);
+  view.setFloat32(offset + 4, (e.clientY - rect.top) / rect.height, true);
+}
 
 function sendTouch(action, e) {
   if (!touchEnabled) return;
@@ -174,27 +186,44 @@ function sendTouch(action, e) {
   }
   if (action === TOUCH.UP || action === TOUCH.CANCEL) slots.delete(e.pointerId);
 
-  const rect = cursorCanvas.getBoundingClientRect();
-  const buf = new ArrayBuffer(11);
-  const view = new DataView(buf);
+  const view = new DataView(new ArrayBuffer(11));
   view.setUint8(0, MSG.TOUCH);
   view.setUint8(1, action);
   view.setUint8(2, slot);
-  view.setFloat32(3, (e.clientX - rect.left) / rect.width, true);
-  view.setFloat32(7, (e.clientY - rect.top) / rect.height, true);
-  send(buf);
+  writePosition(view, 3, e);
+  send(view.buffer);
+}
+
+// Pen and mouse drive the pointer: hovering moves it, the tip (or left button)
+// clicks, and the pen's side button, alone or with the tip, right-clicks.
+function sendPointer(e, ended) {
+  if (!touchEnabled) return;
+  if (e.pointerType === 'pen') penSeen = performance.now();
+  let buttons = 0;
+  if (!ended) buttons = e.buttons & 2 ? BUTTON.RIGHT : e.buttons & 1 ? BUTTON.LEFT : 0;
+  const view = new DataView(new ArrayBuffer(10));
+  view.setUint8(0, MSG.POINTER);
+  view.setUint8(1, buttons);
+  writePosition(view, 2, e);
+  send(view.buffer);
+}
+
+function onPointer(action, e) {
+  if (e.pointerType !== 'touch') sendPointer(e, action === TOUCH.CANCEL);
+  // A rejected palm gets no slot, so its moves and lift are ignored too.
+  else if (action !== TOUCH.DOWN || performance.now() - penSeen > PALM_MS) sendTouch(action, e);
 }
 
 cursorCanvas.addEventListener('pointerdown', (e) => {
   // Keep receiving moves when a finger slides off the canvas edge.
   try { cursorCanvas.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ }
-  sendTouch(TOUCH.DOWN, e);
+  onPointer(TOUCH.DOWN, e);
 });
 cursorCanvas.addEventListener('pointermove', (e) => {
-  for (const ev of e.getCoalescedEvents ? e.getCoalescedEvents() : [e]) sendTouch(TOUCH.MOVE, ev);
+  for (const ev of e.getCoalescedEvents ? e.getCoalescedEvents() : [e]) onPointer(TOUCH.MOVE, ev);
 });
-cursorCanvas.addEventListener('pointerup', (e) => sendTouch(TOUCH.UP, e));
-cursorCanvas.addEventListener('pointercancel', (e) => sendTouch(TOUCH.CANCEL, e));
+cursorCanvas.addEventListener('pointerup', (e) => onPointer(TOUCH.UP, e));
+cursorCanvas.addEventListener('pointercancel', (e) => onPointer(TOUCH.CANCEL, e));
 cursorCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
 // --- connection -------------------------------------------------------------------
