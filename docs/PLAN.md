@@ -216,7 +216,9 @@ the phone, encoder rate control letting bursts exceed `--bitrate`.
       log done: `client … can't keep up, skipped N frames`).
 - [ ] Encoder rate control: constant bitrate with a small VBV buffer
       (`nvh264enc rc-mode=cbr vbv-buffer-size=…`, x264 `vbv-buf-capacity`) so
-      animations can't burst far above `--bitrate`.
+      animations can't burst far above `--bitrate`. (Part of the overshoot was
+      the encoder caps saying 60 fps at up to 120: fixed 2026-11-20, the caps
+      now carry `--max-fps`.)
 - [ ] Per-stream `bitrate=KBPS` option, e.g. a lower bitrate for `audience`.
 - [ ] Re-test the real setup: phone latency during animations should stay close
       to the tablet's.

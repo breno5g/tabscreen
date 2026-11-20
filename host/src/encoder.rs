@@ -67,6 +67,9 @@ pub struct Encoder {
     /// Buffer timestamps are time since `epoch`.
     epoch: Instant,
     pushed: Arc<AtomicU32>,
+    /// Most frames per second capture asks for, and the rate the encoder
+    /// budgets bits for (bitrate / frame rate per frame).
+    pub max_fps: u32,
 }
 
 /// Encode latency and throughput, logged every few seconds while frames flow.
@@ -115,6 +118,7 @@ impl Encoder {
         codec: Codec,
         capture: Capture,
         bitrate_kbps: u32,
+        max_fps: u32,
         frames: broadcast::Sender<Arc<EncodedFrame>>,
     ) -> Result<Arc<Self>> {
         let nvenc = format!(
@@ -203,6 +207,7 @@ impl Encoder {
             last_keyframe_request: Mutex::new(None),
             epoch,
             pushed,
+            max_fps,
         }))
     }
 
@@ -211,9 +216,11 @@ impl Encoder {
             .field("format", format)
             .field("width", width as i32)
             .field("height", height as i32)
-            // A variable rate (0/1) makes x264 hold back one frame, so the last
-            // change before the screen goes static would never be sent.
-            .field("framerate", gst::Fraction::new(60, 1))
+            // Rate control spends bitrate / framerate per frame, so at the top
+            // frame rate the stream matches --bitrate. A variable rate (0/1)
+            // makes x264 hold back one frame, so the last change before the
+            // screen goes static would never be sent.
+            .field("framerate", gst::Fraction::new(self.max_fps as i32, 1))
             .build();
         self.appsrc.set_caps(Some(&caps));
     }
@@ -245,7 +252,7 @@ impl Encoder {
             .field("drm-format", gst_video::dma_drm_fourcc_to_string(fourcc, modifier).as_str())
             .field("width", width as i32)
             .field("height", height as i32)
-            .field("framerate", gst::Fraction::new(60, 1))
+            .field("framerate", gst::Fraction::new(self.max_fps as i32, 1))
             .build();
         self.appsrc.set_caps(Some(&caps));
     }

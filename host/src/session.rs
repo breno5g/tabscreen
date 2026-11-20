@@ -26,6 +26,7 @@ pub struct Settings {
     pub codec: Codec,
     pub capture: Capture,
     pub bitrate_kbps: u32,
+    pub max_fps: u32,
     /// Overrides the size clients ask for (virtual monitors only).
     pub fixed_size: Option<(u32, u32)>,
     /// Accept touch input from clients. Off for view-only streams.
@@ -137,9 +138,9 @@ impl Manager {
     }
 
     fn start(self: &Arc<Self>, requested: (u32, u32)) -> Result<Arc<Session>> {
-        let Settings { name, source, codec, capture, bitrate_kbps, .. } = &self.settings;
+        let Settings { name, source, codec, capture, bitrate_kbps, max_fps, .. } = &self.settings;
         let codec = codec.resolve();
-        let encoder = Encoder::new(codec, *capture, *bitrate_kbps, self.frames.clone())?;
+        let encoder = Encoder::new(codec, *capture, *bitrate_kbps, *max_fps, self.frames.clone())?;
         let transport = match capture {
             Capture::Cpu => Transport::Shm,
             Capture::Gpu => Transport::DmaBuf(encoder.dmabuf_formats()),
@@ -277,6 +278,7 @@ mod tests {
             codec: Codec::X264,
             capture: Capture::Cpu,
             bitrate_kbps: 1000,
+            max_fps: 120,
             fixed_size: None,
             touch: false,
         });

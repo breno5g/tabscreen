@@ -195,9 +195,9 @@ contrast, is in device pixels, matching the video.
 | Mutter D-Bus API, not the xdg-desktop-portal | The portal rejects every touch on virtual streams ("Invalid position": it checks against a stream size virtual streams don't report), and restored portal sessions drop touch permission |
 | Rust with its own PipeWire consumer, not Python + `pipewiresrc` | Pointer-only movement produces no frames in embedded cursor mode, and `pipewiresrc` drops the cursor-only buffers of metadata mode — the cursor updated once a second |
 | Client-drawn cursor | 60 Hz cursor independent of video latency |
-| Capture asks for up to 120 fps | Mutter creates the virtual monitor at the stream's maximum frame rate; a 120 Hz tablet got ~115 fps while scrolling (60 before) |
+| Capture asks for up to `--max-fps` (default 120) | Mutter creates the virtual monitor at the stream's maximum frame rate and never sends more; a 120 Hz tablet got ~115 fps while scrolling (60 before) |
 | `--capture gpu`: our consumer lends its DMA-BUFs to GStreamer, not `pipewiresrc` | Keeps cursor metadata (row above). Tablet at 2800×1752, 120 Hz, scrolling: host + GNOME Shell 200 % → 60 % of a core, NVIDIA 23.6 → 14.3 W, encode 14 → 8 ms, 110 → 120 fps. A `pipewiresrc` prototype stopped at 60 fps, and handing `nvh264enc` the GL texture took 18 ms a frame, hence NV12 in GL plus `cudaupload`. Opt-in until it has more mileage |
-| `60/1` framerate in the encoder caps | With a variable rate (`0/1`) x264 held back one frame, so the last change before the screen went static never arrived |
+| `--max-fps` as the framerate in the encoder caps | Rate control spends bitrate ÷ framerate per frame: with a fixed `60/1`, 98 fps came out at 20 Mbit/s for `--bitrate 12000`; now ~12. A variable rate (`0/1`) made x264 hold back one frame, so the last change before the screen went static never arrived |
 | Monitor sized by the client's `hello` | No configuration; follows rotation; one binary for any tablet |
 | Web client first, native app later | Proved the whole path without an Android build |
 | Mirror via `RecordMonitor`, kept running | Shows the real projector output at its own size; always-on because Mutter sends no initial frame for a static monitor |

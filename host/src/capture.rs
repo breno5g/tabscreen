@@ -92,10 +92,10 @@ fn serialize(obj: Object) -> Vec<u8> {
         .into_inner()
 }
 
-/// A video format offer: one of `formats`, at up to 120 fps. `size`: the
+/// A video format offer: one of `formats`, at up to `max_fps`. `size`: the
 /// virtual monitor size we ask for (a fixed size makes Mutter size the
 /// monitor), or `None` to accept whatever the source has (a mirror).
-fn format_object(size: Option<(u32, u32)>, formats: &[VideoFormat]) -> Object {
+fn format_object(size: Option<(u32, u32)>, max_fps: u32, formats: &[VideoFormat]) -> Object {
     use spa::param::format::{FormatProperties, MediaSubtype, MediaType};
     let mut format = pw::spa::pod::object!(
         spa::utils::SpaTypes::ObjectParamFormat,
@@ -108,9 +108,9 @@ fn format_object(size: Option<(u32, u32)>, formats: &[VideoFormat]) -> Object {
             Choice,
             Range,
             Fraction,
-            Fraction { num: 120, denom: 1 },
+            Fraction { num: max_fps, denom: 1 },
             Fraction { num: 1, denom: 1 },
-            Fraction { num: 120, denom: 1 }
+            Fraction { num: max_fps, denom: 1 }
         ),
     );
     let ids: Vec<Id> = formats.iter().map(|f| Id(f.as_raw())).collect();
@@ -150,9 +150,9 @@ fn modifier_property(modifiers: &[u64], fixed: bool) -> Property {
 }
 
 /// What we offer Mutter to connect: one param per format.
-fn format_params(size: Option<(u32, u32)>, transport: &Transport) -> Vec<Vec<u8>> {
+fn format_params(size: Option<(u32, u32)>, max_fps: u32, transport: &Transport) -> Vec<Vec<u8>> {
     match transport {
-        Transport::Shm => vec![serialize(format_object(size, &FORMATS.map(|f| f.0)))],
+        Transport::Shm => vec![serialize(format_object(size, max_fps, &FORMATS.map(|f| f.0)))],
         Transport::DmaBuf(drm) => FORMATS
             .iter()
             .filter_map(|&(format, _, code)| {
@@ -160,7 +160,7 @@ fn format_params(size: Option<(u32, u32)>, transport: &Transport) -> Vec<Vec<u8>
                 if modifiers.is_empty() {
                     return None;
                 }
-                let mut object = format_object(size, &[format]);
+                let mut object = format_object(size, max_fps, &[format]);
                 object.properties.push(modifier_property(&modifiers, false));
                 Some(serialize(object))
             })
@@ -454,6 +454,7 @@ fn run(
     cursor: CursorChannels,
     negotiated: std::sync::mpsc::Sender<(u32, u32)>,
 ) -> Result<()> {
+    let max_fps = encoder.max_fps;
     pw::init();
     let mainloop = pw::main_loop::MainLoopRc::new(None)?;
     let context = pw::context::ContextRc::new(&mainloop, None)?;
@@ -530,7 +531,7 @@ fn run(
                             eprintln!("capture: no DMA-BUF modifier in common for {name}; try --capture cpu");
                             return;
                         };
-                        let mut fixed = format_object(Some((w, h)), &[format]);
+                        let mut fixed = format_object(Some((w, h)), format_encoder.max_fps, &[format]);
                         fixed.properties.push(modifier_property(&[modifier], true));
                         let fixed = serialize(fixed);
                         if let Err(e) = stream.update_params(&mut [Pod::from_bytes(&fixed).unwrap()]) {
@@ -586,7 +587,7 @@ fn run(
         })
         .register()?;
 
-    let formats = format_params(size, &transport);
+    let formats = format_params(size, max_fps, &transport);
     if formats.is_empty() {
         bail!("the GPU can't import a DMA-BUF in any format we use; try --capture cpu");
     }
@@ -617,19 +618,19 @@ mod tests {
     #[test]
     fn offers_only_formats_with_modifiers() {
         let drm = vec![(fourcc(b"AR24"), 0x0300_0000_0060_6012), (fourcc(b"AR24"), 0), (fourcc(b"NV12"), 0)];
-        assert_eq!(format_params(None, &Transport::DmaBuf(drm)).len(), 1, "only BGRA (AR24) has modifiers");
-        assert_eq!(format_params(None, &Transport::Shm).len(), 1);
-        assert!(format_params(None, &Transport::DmaBuf(vec![])).is_empty());
+        assert_eq!(format_params(None, 120, &Transport::DmaBuf(drm)).len(), 1, "only BGRA (AR24) has modifiers");
+        assert_eq!(format_params(None, 120, &Transport::Shm).len(), 1);
+        assert!(format_params(None, 120, &Transport::DmaBuf(vec![])).is_empty());
     }
 
     #[test]
     fn reads_back_modifiers_to_fixate() {
-        let mut object = format_object(Some((64, 64)), &[VideoFormat::BGRA]);
+        let mut object = format_object(Some((64, 64)), 120, &[VideoFormat::BGRA]);
         object.properties.push(modifier_property(&[7, 0], false));
         let bytes = serialize(object);
         assert_eq!(modifiers_to_fixate(Pod::from_bytes(&bytes).unwrap()), Some(vec![7, 7, 0]));
 
-        let mut object = format_object(Some((64, 64)), &[VideoFormat::BGRA]);
+        let mut object = format_object(Some((64, 64)), 120, &[VideoFormat::BGRA]);
         object.properties.push(modifier_property(&[7], true));
         let bytes = serialize(object);
         let pod = Pod::from_bytes(&bytes).unwrap();

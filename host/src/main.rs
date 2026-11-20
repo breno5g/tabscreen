@@ -50,9 +50,12 @@ struct Args {
     /// How frames reach the encoder. `gpu` needs NVENC.
     #[arg(long, value_enum, default_value_t = Capture::Cpu)]
     capture: Capture,
-    /// Target bitrate in kbit/s.
+    /// Target bitrate in kbit/s, reached when the screen changes at --max-fps.
     #[arg(long, default_value_t = 12000)]
     bitrate: u32,
+    /// Most frames per second to capture and send.
+    #[arg(long, default_value_t = 120, value_parser = clap::value_parser!(u32).range(1..=120))]
+    max_fps: u32,
     /// Keep `adb reverse` set up for USB-connected Android devices.
     #[arg(long)]
     usb: bool,
@@ -155,6 +158,7 @@ async fn main() -> Result<()> {
                     codec: args.encoder,
                     capture: args.capture,
                     bitrate_kbps: args.bitrate,
+                    max_fps: args.max_fps,
                     fixed_size: spec.size,
                     touch: spec.touch,
                 });
@@ -176,7 +180,7 @@ async fn main() -> Result<()> {
         usb::spawn(args.port, streams[0].manager.clone());
     }
     let wifi_server = if args.wifi { Some(prepare_wifi(&streams, args.wifi_port)?) } else { None };
-    print_streams(&streams, args.port, args.encoder, args.capture);
+    print_streams(&streams, &args);
 
     let addr = SocketAddr::new(args.bind, args.port);
     let wifi_streams = streams.clone();
@@ -214,8 +218,12 @@ fn path(streams: &[Stream], i: usize) -> String {
     if i == 0 { "/".into() } else { format!("/s/{}/", streams[i].manager.name()) }
 }
 
-fn print_streams(streams: &[Stream], port: u16, encoder: Codec, capture: Capture) {
-    eprintln!("tabscreen: encoder {:?}, capture {capture:?}; Ctrl+C to stop", encoder.resolve());
+fn print_streams(streams: &[Stream], args: &Args) {
+    let Args { port, encoder, capture, bitrate, max_fps, .. } = args;
+    eprintln!(
+        "tabscreen: encoder {:?}, capture {capture:?}, {bitrate} kbit/s, up to {max_fps} fps; Ctrl+C to stop",
+        encoder.resolve()
+    );
     for (i, stream) in streams.iter().enumerate() {
         let m = &stream.manager;
         let what = match m.source() {

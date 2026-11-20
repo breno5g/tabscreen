@@ -155,7 +155,8 @@ encoding time, at the same frame rate. `cpu` (the default) works with any encode
 | `--list-monitors` | | List monitors and their connector names, then exit |
 | `--encoder auto\|nvenc\|x264` | `auto` | `auto` picks NVENC when available |
 | `--capture cpu\|gpu` | `cpu` | `gpu` keeps frames on the GPU (DMA-BUF to NVENC); needs NVENC — see above |
-| `--bitrate KBPS` | `12000` | Target video bitrate |
+| `--bitrate KBPS` | `12000` | Target video bitrate, reached when the screen changes at `--max-fps` |
+| `--max-fps N` | `120` | Most frames per second (1–120); lower saves bandwidth, CPU and power |
 | `--port PORT` | `8765` | HTTP port (USB) |
 | `--wifi-port PORT` | `8766` | HTTPS port (Wi‑Fi) |
 | `--bind ADDR` | `127.0.0.1` | Listen address of the HTTP server |
